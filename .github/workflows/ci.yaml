@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel a stale run for the same branch/PR when new commits land on top of it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_VERSION: "10.0.x"
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore dependencies
+        run: dotnet restore TicketFlow.sln
+
+      - name: Restore dotnet tools
+        run: dotnet tool restore
+
+      - name: Verify code formatting
+        run: dotnet format TicketFlow.sln --verify-no-changes
+
+      - name: Verify EF Core migrations are up to date
+        run: dotnet ef migrations has-pending-model-changes --project src/TicketFlow.Api
+
+      - name: Build
+        run: dotnet build TicketFlow.sln --no-restore --configuration Release
+
+      - name: Test
+        run: dotnet test TicketFlow.sln --no-build --configuration Release --logger "console;verbosity=normal"
