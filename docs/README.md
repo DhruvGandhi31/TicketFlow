@@ -6,7 +6,7 @@ Personal build-log/reference for this project — one file per phase, written fo
 |---|---|---|
 | 0 | [Toolchain setup](phase-0-toolchain-setup.md) | Done |
 | 1 | [Single API: Events + Seats](phase-1-events-seats-api.md) | Done |
-| 2 | Split into services + Docker Compose + API Gateway | Not started |
+| 2 | [Microservices split + Docker Compose + API Gateway](phase-2-microservices-split.md) | Done |
 | 3 | gRPC (Bookings → Seats) | Not started |
 | 4 | RabbitMQ event-driven flow | Not started |
 | 5 | Redis | Not started |

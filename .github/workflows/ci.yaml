@@ -49,12 +49,34 @@ jobs:
       - name: Verify code formatting
         run: dotnet format TicketFlow.sln --verify-no-changes
 
-      # catches the classic "changed a model, forgot to add a migration" mistake before it merges
-      - name: Verify EF Core migrations are up to date
-        run: dotnet ef migrations has-pending-model-changes --project src/TicketFlow.Api
+      # catches the classic "changed a model, forgot to add a migration" mistake before it merges -
+      # one check per service now that events/seats each have their own db and their own migrations
+      - name: Verify EF Core migrations are up to date (Events)
+        run: dotnet ef migrations has-pending-model-changes --project src/TicketFlow.Events.Api
+
+      - name: Verify EF Core migrations are up to date (Seats)
+        run: dotnet ef migrations has-pending-model-changes --project src/TicketFlow.Seats.Api
 
       - name: Build
         run: dotnet build TicketFlow.sln --no-restore --configuration Release
 
       - name: Test
         run: dotnet test TicketFlow.sln --no-build --configuration Release --logger "console;verbosity=normal"
+
+  docker-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # just proves each Dockerfile actually produces an image - doesn't push anywhere yet,
+      # that's a later phase once there's somewhere real to push to
+      - name: Build Events image
+        run: docker build -f src/TicketFlow.Events.Api/Dockerfile -t ticketflow-events-api .
+
+      - name: Build Seats image
+        run: docker build -f src/TicketFlow.Seats.Api/Dockerfile -t ticketflow-seats-api .
+
+      - name: Build Gateway image
+        run: docker build -f src/TicketFlow.Gateway/Dockerfile -t ticketflow-gateway .

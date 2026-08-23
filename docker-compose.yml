@@ -1,0 +1,63 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ticketflow
+      POSTGRES_PASSWORD: ticketflow
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d
+    ports:
+      # published so `dotnet run` outside docker (e.g. F5 in VS Code) can still reach this postgres
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ticketflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  events-api:
+    build:
+      context: .
+      dockerfile: src/TicketFlow.Events.Api/Dockerfile
+    environment:
+      # Development on purpose even though it's "in docker" - this is a demo project, keeping
+      # swagger + auto-migrate-on-boot on makes it actually explorable
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__TicketFlowEvents: Host=postgres;Port=5432;Database=events;Username=ticketflow;Password=ticketflow
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "5101:8080" # so you can hit swagger on this service directly, bypassing the gateway
+
+  seats-api:
+    build:
+      context: .
+      dockerfile: src/TicketFlow.Seats.Api/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__TicketFlowSeats: Host=postgres;Port=5432;Database=seats;Username=ticketflow;Password=ticketflow
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "5102:8080"
+
+  gateway:
+    build:
+      context: .
+      dockerfile: src/TicketFlow.Gateway/Dockerfile
+    environment:
+      # Production (the default if unset, but spelling it out) so it reads the base appsettings.json
+      # ReverseProxy section - the one pointing at events-api/seats-api by docker service name
+      ASPNETCORE_ENVIRONMENT: Production
+    depends_on:
+      - events-api
+      - seats-api
+    ports:
+      # the one port an actual client is meant to hit
+      - "5100:8080"
+
+volumes:
+  postgres-data:

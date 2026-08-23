@@ -6,34 +6,53 @@ An event-ticketing platform built in C# / .NET, developed in phases from a singl
 
 ## What it does
 
-TicketFlow manages events and their seat inventory: create an event with a generated seat map, browse seats, and move a seat through `Available → Held → Booked` (or release a hold). The seat-hold flow — reserve a seat, hold it for a short window, then confirm or release — is the same shape used by real ticketing systems (Ticketmaster, StubHub, etc.) to prevent double-selling a seat while a buyer is checking out.
+TicketFlow manages events and their seat inventory: create an event, generate a seat map for it, browse seats, and move a seat through `Available → Held → Booked` (or release a hold). The seat-hold flow — reserve a seat, hold it for a short window, then confirm or release — is the same shape used by real ticketing systems (Ticketmaster, StubHub, etc.) to prevent double-selling a seat while a buyer is checking out.
 
-## Current status: Phase 1 complete
+## Current status: Phase 2 complete
 
-This is currently a single ASP.NET Core Web API (a deliberate monolith) covering the **Events** and **Seats** domain. It is not yet split into microservices — that's the next phase. See [Roadmap](#roadmap) below for where this is headed.
+Three independently deployable services behind a gateway, each with its own database — verified end-to-end with `docker compose up` (create event → generate seat map → reserve → book, all routed correctly through the gateway to the right service).
+
+```
+                    ┌──────────────┐
+   client ───────▶  │   Gateway    │  (YARP reverse proxy)
+                    └──────┬───────┘
+                 ┌─────────┴─────────┐
+                 ▼                   ▼
+         ┌───────────────┐   ┌───────────────┐
+         │  Events API   │   │  Seats API    │
+         └───────┬───────┘   └───────┬───────┘
+                 ▼                   ▼
+         ┌───────────────┐   ┌───────────────┐
+         │  events (db)  │   │  seats (db)   │
+         └───────────────┘   └───────────────┘
+              (one postgres instance, two databases)
+```
+
+Events and Seats can no longer see each other's data directly — no shared database, no cross-service foreign keys. `EventResponse` lost the seat-count fields it had in Phase 1 as a result; composing that back together across two services is exactly what Phase 3's gRPC call is for. See [`docs/phase-2-microservices-split.md`](docs/phase-2-microservices-split.md) for the full story, including a couple of EF Core gotchas hit while splitting the test suite.
 
 ## Tech stack
 
 **In use today**
 - C# 13 / .NET 10 (LTS)
 - ASP.NET Core Minimal APIs
-- Entity Framework Core + SQLite
-- Swagger / OpenAPI (via Swashbuckle)
-- xUnit + `WebApplicationFactory` integration tests (real HTTP calls against an in-memory SQLite database, including a concurrency test proving the seat-reservation race guard actually holds)
-- GitHub Actions CI (build, format check, EF migration drift check, test)
+- Entity Framework Core + PostgreSQL (one Postgres instance, one database per service)
+- YARP reverse proxy as an API Gateway
+- Docker + Docker Compose
+- Swagger / OpenAPI (via Swashbuckle) per service
+- xUnit + `WebApplicationFactory` integration tests (SQLite in-memory, not Postgres — see the docs for why), including a concurrency test proving the seat-reservation race guard actually holds
+- GitHub Actions CI (build, format check, EF migration drift check per service, test, Docker image build validation)
 
 **Planned (see roadmap)**
-- Docker Compose → Kubernetes
+- Kubernetes
 - gRPC (synchronous inter-service seat reservation)
 - RabbitMQ (event-driven booking/payment/notification flow)
 - Redis (seat-hold TTLs, read caching)
 - Prometheus + Grafana (metrics/observability)
-- YARP API Gateway
 
 ## Domain model
 
-- **Event** — `Name`, `VenueName`, `StartsAtUtc`, `Description`, and a collection of `Seat`s.
-- **Seat** — belongs to an `Event`; has a `Section`/`Row`/`Number` and a `Status`:
+- **Event** (Events service) — `Name`, `VenueName`, `StartsAtUtc`, `Description`.
+- **Seat** (Seats service) — `EventId` (a plain value, not a foreign key — it points at a row in a different service's database), `Section`/`Row`/`Number`, and a `Status`:
 
   ```
   Available --reserve--> Held --book--> Booked
@@ -44,85 +63,94 @@ This is currently a single ASP.NET Core Web API (a deliberate monolith) covering
 
 ## API reference
 
-| Method | Route | Description |
-|---|---|---|
-| `GET` | `/events` | List all events with seat counts |
-| `GET` | `/events/{id}` | Get one event |
-| `POST` | `/events` | Create an event, optionally generating a seat map |
-| `GET` | `/events/{eventId}/seats` | List seats for an event (optional `?status=` filter) |
-| `POST` | `/events/{eventId}/seats/{seatId}/reserve` | `Available → Held` |
-| `POST` | `/events/{eventId}/seats/{seatId}/book` | `Held → Booked` |
-| `POST` | `/events/{eventId}/seats/{seatId}/release` | `Held → Available` |
+All routes below are hit through the **gateway** (port 5100 locally, or 8080 inside Docker) — clients only ever talk to one address; the gateway routes to whichever service owns that data.
 
-Full interactive docs are available via Swagger UI when running locally (see below).
+| Method | Route | Owning service |
+|---|---|---|
+| `GET` | `/events` | Events |
+| `GET` | `/events/{id}` | Events |
+| `POST` | `/events` | Events |
+| `POST` | `/events/{eventId}/seats` | Seats — generates the seat map |
+| `GET` | `/events/{eventId}/seats` | Seats — optional `?status=` filter |
+| `POST` | `/events/{eventId}/seats/{seatId}/reserve` | Seats — `Available → Held` |
+| `POST` | `/events/{eventId}/seats/{seatId}/book` | Seats — `Held → Booked` |
+| `POST` | `/events/{eventId}/seats/{seatId}/release` | Seats — `Held → Available` |
+
+Each service also has its own Swagger UI when run in Development mode (see below).
 
 ## Getting started
 
-**Prerequisites:** [.NET 10 SDK](https://dotnet.microsoft.com/download)
+**Prerequisites:** [.NET 10 SDK](https://dotnet.microsoft.com/download), [Docker](https://www.docker.com/) (with Docker Compose)
+
+### Run everything with Docker Compose (recommended)
 
 ```bash
-# clone and enter the repo
 git clone https://github.com/DhruvGandhi31/TicketFlow.git
 cd TicketFlow
-
-# restore the pinned dotnet-ef tool
-dotnet tool restore
-
-# restore & build
-dotnet restore
-dotnet build
-
-# run the API (applies pending EF Core migrations automatically on startup)
-cd src/TicketFlow.Api
-dotnet run
+docker compose up --build
 ```
 
-To run the test suite instead:
+This starts Postgres (with `events` and `seats` databases created automatically), both APIs, and the gateway. Once it's up:
+
+- Gateway (the one address a client needs): `http://localhost:5100`
+- Events service directly + Swagger: `http://localhost:5101/swagger`
+- Seats service directly + Swagger: `http://localhost:5102/swagger`
+
+### Run a service locally without Docker
+
+```bash
+docker compose up postgres   # just the database
+dotnet tool restore          # once, after clone
+dotnet restore && dotnet build
+cd src/TicketFlow.Events.Api && dotnet run   # or TicketFlow.Seats.Api / TicketFlow.Gateway
+```
+
+### Run the test suite
 
 ```bash
 dotnet test TicketFlow.sln
 ```
 
-Then open `http://localhost:<port>/swagger` (the port is printed in the console output) to try the API interactively.
-
-### Example: create an event and reserve a seat
+### Example: create an event, generate seats, reserve one — through the gateway
 
 ```bash
-curl -X POST http://localhost:5242/events -H "Content-Type: application/json" -d '{
+EVENT=$(curl -s -X POST http://localhost:5100/events -H "Content-Type: application/json" -d '{
   "name": "Indie Rock Night",
   "venueName": "The Grand Hall",
-  "startsAtUtc": "2026-09-15T19:00:00Z",
-  "seatMap": { "sections": ["GA"], "rowsPerSection": 3, "seatsPerRow": 10 }
+  "startsAtUtc": "2026-09-15T19:00:00Z"
+}')
+EVENT_ID=$(echo "$EVENT" | grep -o '"id":"[^"]*"' | cut -d'"' -f4)
+
+curl -X POST http://localhost:5100/events/$EVENT_ID/seats -H "Content-Type: application/json" -d '{
+  "sections": ["GA"], "rowsPerSection": 3, "seatsPerRow": 10
 }'
 
-curl -X POST http://localhost:5242/events/{eventId}/seats/{seatId}/reserve
+curl -X POST http://localhost:5100/events/$EVENT_ID/seats/{seatId}/reserve
 ```
 
 ## Project structure
 
 ```
 TicketFlow/
-├── .github/workflows/ci.yaml     # build, format, migration-drift check, test
+├── .github/workflows/ci.yaml     # build, format, per-service migration-drift check, test, docker build
+├── docker-compose.yml
+├── db/init/                      # postgres init script: creates the events + seats databases
 ├── TicketFlow.sln
 ├── src/
-│   └── TicketFlow.Api/
-│       ├── Models/                # EF Core entities (Event, Seat)
-│       ├── Data/                  # DbContext
-│       ├── Contracts/             # Request/response DTOs
-│       ├── Endpoints/             # Minimal API route groups
-│       ├── Migrations/            # EF Core-generated schema history
-│       └── Program.cs             # composition root
+│   ├── TicketFlow.Events.Api/    # owns Event data + its own postgres db
+│   ├── TicketFlow.Seats.Api/     # owns Seat data + its own postgres db
+│   └── TicketFlow.Gateway/       # YARP reverse proxy, routes /events/**/seats/** vs /events/**
 └── tests/
-    └── TicketFlow.Api.Tests/
-        ├── TicketFlowApiFactory.cs    # WebApplicationFactory: in-memory SQLite, shared-cache mode
-        ├── EventEndpointsTests.cs
-        └── SeatEndpointsTests.cs
+    ├── TicketFlow.Events.Api.Tests/
+    └── TicketFlow.Seats.Api.Tests/
 ```
+
+Each service project follows the same internal shape: `Models/`, `Data/` (DbContext), `Contracts/` (DTOs), `Endpoints/` (minimal API route groups), `Migrations/`, `Program.cs`, `Dockerfile`.
 
 ## Roadmap
 
 - [x] **Phase 1** — Single ASP.NET Core API (Events + Seats), EF Core, Swagger, xUnit integration tests
-- [ ] **Phase 2** — Split into services (Events, Seats) + Docker Compose + API Gateway (YARP)
+- [x] **Phase 2** — Split into services (Events, Seats) + Docker Compose + API Gateway (YARP)
 - [ ] **Phase 3** — gRPC for synchronous Bookings → Seats reservation
 - [ ] **Phase 4** — RabbitMQ event-driven flow (Bookings, Payments, Notifications services)
 - [ ] **Phase 5** — Redis (seat-hold TTLs, caching)
