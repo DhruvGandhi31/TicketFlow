@@ -10,6 +10,7 @@ public class TicketFlowDbContext(DbContextOptions<TicketFlowDbContext> options) 
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        // app code already avoids dupe seats but might as well have the db back it up too
         modelBuilder.Entity<Seat>()
             .HasIndex(s => new { s.EventId, s.Section, s.Row, s.Number })
             .IsUnique();
@@ -18,6 +19,6 @@ public class TicketFlowDbContext(DbContextOptions<TicketFlowDbContext> options) 
             .HasOne(s => s.Event)
             .WithMany(e => e.Seats)
             .HasForeignKey(s => s.EventId)
-            .OnDelete(DeleteBehavior.Cascade);
+            .OnDelete(DeleteBehavior.Cascade); // kill the event, kill its seats, don't leave orphans around
     }
 }

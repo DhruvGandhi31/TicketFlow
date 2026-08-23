@@ -13,6 +13,7 @@ public static class EventEndpoints
 
         group.MapGet("/", async (TicketFlowDbContext db) =>
         {
+            // Include is not optional here, forget it and every seat count just comes back 0
             var events = await db.Events.Include(e => e.Seats).AsNoTracking().ToListAsync();
             return events.Select(EventResponse.FromEvent);
         })
@@ -29,6 +30,7 @@ public static class EventEndpoints
 
         group.MapPost("/", async (CreateEventRequest request, TicketFlowDbContext db) =>
         {
+            // quick and dirty check, swap for FluentValidation or similar if this grows any more rules
             if (string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.VenueName))
             {
                 return Results.ValidationProblem(new Dictionary<string, string[]>
@@ -50,6 +52,7 @@ public static class EventEndpoints
                 ev.Seats = GenerateSeatMap(ev.Id, seatMap);
             }
 
+            // seats are already hanging off ev.Seats so ef just picks them up as new rows too, no AddRange needed
             db.Events.Add(ev);
             await db.SaveChangesAsync();
 
@@ -68,7 +71,7 @@ public static class EventEndpoints
         {
             for (var rowIndex = 0; rowIndex < seatMap.RowsPerSection; rowIndex++)
             {
-                var rowLabel = ((char)('A' + rowIndex)).ToString();
+                var rowLabel = ((char)('A' + rowIndex)).ToString(); // breaks past row 26 (Z), not worrying about it yet
 
                 for (var seatNumber = 1; seatNumber <= seatMap.SeatsPerRow; seatNumber++)
                 {

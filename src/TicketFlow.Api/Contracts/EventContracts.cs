@@ -9,7 +9,7 @@ public record CreateEventRequest(
     string VenueName,
     DateTime StartsAtUtc,
     string? Description,
-    SeatMapRequest? SeatMap);
+    SeatMapRequest? SeatMap); // leave this null if you just want a bare event, no seats generated
 
 public record EventResponse(
     Guid Id,
@@ -20,6 +20,8 @@ public record EventResponse(
     int TotalSeats,
     int AvailableSeats)
 {
+    // heads up: this counts whatever's in e.Seats in memory, so the caller needs to have
+    // .Include()'d it - otherwise both counts just silently come back as 0
     public static EventResponse FromEvent(Event e) => new(
         e.Id, e.Name, e.VenueName, e.StartsAtUtc, e.Description,
         e.Seats.Count,

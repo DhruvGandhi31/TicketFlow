@@ -1,5 +1,6 @@
 namespace TicketFlow.Api.Models;
 
+// heads up: this gets stored as a plain int (0/1/2) in sqlite, so raw db/json dumps show numbers not names
 public enum SeatStatus
 {
     Available,
@@ -19,6 +20,7 @@ public class Seat
 
     public SeatStatus Status { get; set; } = SeatStatus.Available;
 
-    // Null unless Status == Held; a background sweep (or a future Redis TTL) releases the seat once this passes.
+    // only set while Held. nothing actively expires this yet, book/reserve just check it manually.
+    // redis ttl will probably replace this whole column down the line
     public DateTime? HeldUntilUtc { get; set; }
 }

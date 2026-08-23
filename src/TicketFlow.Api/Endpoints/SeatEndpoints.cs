@@ -28,8 +28,8 @@ public static class SeatEndpoints
         })
         .WithName("GetSeats");
 
-        // Available -> Held. Uses a conditional UPDATE (WHERE Status = Available) so two concurrent
-        // requests for the same seat can't both succeed - only one row-affected count comes back as 1.
+        // available -> held. the WHERE Status = Available is the whole trick here - if two requests
+        // hit this at the same time only one of them actually matches the row, the other gets 0 back
         group.MapPost("/{seatId:guid}/reserve", async (Guid eventId, Guid seatId, TicketFlowDbContext db) =>
         {
             var heldUntil = DateTime.UtcNow.Add(HoldDuration);
@@ -50,7 +50,7 @@ public static class SeatEndpoints
         })
         .WithName("ReserveSeat");
 
-        // Held (and not expired) -> Booked.
+        // held (and hold hasn't expired) -> booked
         group.MapPost("/{seatId:guid}/book", async (Guid eventId, Guid seatId, TicketFlowDbContext db) =>
         {
             var now = DateTime.UtcNow;
@@ -64,6 +64,7 @@ public static class SeatEndpoints
 
             if (rowsAffected == 0)
             {
+                // don't really care here whether it was never held or the hold just timed out, same response either way
                 return Results.Conflict(new { message = "Seat must have an active hold before it can be booked." });
             }
 
@@ -72,7 +73,7 @@ public static class SeatEndpoints
         })
         .WithName("BookSeat");
 
-        // Held -> Available (cancel a hold, e.g. the user abandoned checkout).
+        // held -> available, for when someone bails on checkout instead of confirming
         group.MapPost("/{seatId:guid}/release", async (Guid eventId, Guid seatId, TicketFlowDbContext db) =>
         {
             var rowsAffected = await db.Seats

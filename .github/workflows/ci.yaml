@@ -6,7 +6,7 @@ on:
   pull_request:
     branches: [main]
 
-# Cancel a stale run for the same branch/PR when new commits land on top of it.
+# no point running two CI runs for the same branch if a newer push already superseded it
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -49,6 +49,7 @@ jobs:
       - name: Verify code formatting
         run: dotnet format TicketFlow.sln --verify-no-changes
 
+      # catches the classic "changed a model, forgot to add a migration" mistake before it merges
       - name: Verify EF Core migrations are up to date
         run: dotnet ef migrations has-pending-model-changes --project src/TicketFlow.Api
 

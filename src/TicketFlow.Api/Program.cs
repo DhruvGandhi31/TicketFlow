@@ -17,6 +17,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI();
 
+    // just auto-migrate on boot for now, saves running `dotnet ef database update` by hand every time
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<TicketFlowDbContext>();
     await db.Database.MigrateAsync();
@@ -28,3 +29,6 @@ app.MapEventEndpoints();
 app.MapSeatEndpoints();
 
 app.Run();
+
+// top-level statements make Program internal by default - tests need to see it for WebApplicationFactory<Program>
+public partial class Program;
